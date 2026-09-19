@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>MEXC BTC 悬浮窗</title>
+<style>
+html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif}
+body{text-align:center;padding:40px 16px}
+.container{max-width:420px;margin:auto}
+button{padding:16px 24px;font-size:17px;font-weight:700;border:0;background:#007aff;color:#fff;border-radius:12px}
+#status{margin:18px 0 0;color:#8e8e93;font-size:13px;line-height:1.5}
+video{display:block;width:320px;height:160px;margin:25px auto 0;background:#000;border:1px solid #222;border-radius:12px}
+canvas{display:none}
+</style>
+</head>
+<body>
+<div class="container">
+<h2>MEXC BTC 永续合约</h2>
+<p id="status">正在连接 MEXC…</p>
+<button id="pipBtn">⚡ 开启悬浮窗</button>
+<canvas id="canvas" width="640" height="320"></canvas>
+<video id="video" width="320" height="160" autoplay playsinline muted></video>
+</div>
+
+<script>
+"use strict";
+
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const video=document.getElementById("video");
+const btn=document.getElementById("pipBtn");
+const status=document.getElementById("status");
+
+let btcPrice="加载中...";
+let priceColor="#007aff";
+let lastPrice=0;
+let ws=null;
+let pingTimer=null;
+let reconnectTimer=null;
+
+function drawCanvas(){
+  ctx.fillStyle="#000";
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  ctx.strokeStyle="#1c1c1e";
+  ctx.lineWidth=6;
+  ctx.strokeRect(3,3,canvas.width-6,canvas.height-6);
+
+  ctx.fillStyle="#8e8e93";
+  ctx.font="bold 32px -apple-system";
+  ctx.textAlign="center";
+  ctx.fillText("MEXC  BTC永续",canvas.width/2,95);
+
+  ctx.fillStyle=priceColor;
+  ctx.font="bold 76px Arial";
+  ctx.fillText("$"+btcPrice,canvas.width/2,215);
+}
+
+function startStream(){
+  if(!canvas.captureStream){
+    status.textContent="当前 iPhone 浏览器不支持 Canvas 视频流";
+    return false;
+  }
+  try{
+    video.srcObject=canvas.captureStream(5);
+    return true;
+  }catch(e){
+    status.textContent="无法创建视频流："+e.message;
+    return false;
+  }
+}
+
+function stopPing(){
+  if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
+}
+
+function connectMEXC(){
+  if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
+
+  status.textContent="正在连接 MEXC…";
+  ws=new WebSocket("wss://contract.mexc.com/edge");
+
+  ws.onopen=()=>{
+    status.textContent="已连接 MEXC，等待 BTC 价格…";
+    ws.send(JSON.stringify({
+      method:"sub.ticker",
+      param:{symbol:"BTC_USDT"}
+    }));
+
+    stopPing();
+    pingTimer=setInterval(()=>{
+      if(ws && ws.readyState===WebSocket.OPEN){
+        ws.send(JSON.stringify({method:"ping"}));
+      }
+    },15000);
+  };
+
+  ws.onmessage=(event)=>{
+    try{
+      const res=JSON.parse(event.data);
+      if(res.channel==="push.ticker" && res.symbol==="BTC_USDT" && res.data){
+        const p=parseFloat(res.data.lastPrice);
+        if(!Number.isFinite(p)) return;
+
+        if(lastPrice){
+          if(p>lastPrice) priceColor="#34c759";
+          else if(p<lastPrice) priceColor="#ff3b30";
+        }
+        btcPrice=p.toFixed(1);
+        lastPrice=p;
+        status.textContent="MEXC 实时连接正常";
+      }
+    }catch(e){}
+  };
+
+  ws.onerror=()=>{
+    status.textContent="MEXC 连接异常，准备重连…";
+  };
+
+  ws.onclose=()=>{
+    stopPing();
+    status.textContent="连接断开，3 秒后重连…";
+    clearTimeout(reconnectTimer);
+    reconnectTimer=setTimeout(connectMEXC,3000);
+  };
+}
+
+setInterval(drawCanvas,200);
+drawCanvas();
+
+const streamOK=startStream();
+if(!streamOK){
+  btn.disabled=true;
+}else{
+  connectMEXC();
+}
+
+btn.addEventListener("click",async()=>{
+  try{
+    if(!document.pictureInPictureEnabled){
+      alert("此浏览器当前不支持画中画。请用 Safari 打开，并确保 iPhone 系统支持视频画中画。");
+      return;
+    }
+
+    await video.play();
+
+    if(video.requestPictureInPicture){
+      await video.requestPictureInPicture();
+    }else{
+      alert("当前 iOS 浏览器没有提供 requestPictureInPicture 接口。");
+    }
+  }catch(error){
+    alert("开启悬浮窗失败：\n"+error.message+
+      "\n\n请确认：\n1. 用 Safari 打开；\n2. 不要停留在“文件”App的预览界面；\n3. 先点击一次网页里的按钮。");
+  }
+});
+</script>
+</body>
+</html>

@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>BTC 实时 K 线悬浮窗</title>
 <style>
@@ -10,7 +10,8 @@ html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMac
 body{text-align:center;padding:40px 16px}
 .container{max-width:420px;margin:auto}
 h2{margin-bottom:10px;font-size:22px}
-button{padding:16px 24px;font-size:17px;font-weight:700;border:0;background:#007aff;color:#fff;border-radius:12px;margin-top:10px}
+button{padding:16px 24px;font-size:17px;font-weight:700;border:0;background:#007aff;color:#fff;border-radius:12px;margin-top:10px;cursor:pointer;}
+button:active{transform:scale(0.95);opacity:0.8;}
 #status{margin:18px 0 0;color:#8e8e93;font-size:13px;line-height:1.5}
 video{display:block;width:320px;height:160px;margin:25px auto 0;background:#000;border:1px solid #222;border-radius:12px}
 canvas{display:none}
@@ -22,7 +23,6 @@ canvas{display:none}
 <p id="status">正在建立连接…</p>
 <button id="pipBtn">⚡ 开启悬浮窗</button>
 <canvas id="canvas" width="640" height="320"></canvas>
-<!-- 【关键修复 1】移除了 muted 属性，允许后续注入空白音频以保活后台 -->
 <video id="video" width="320" height="160" autoplay playsinline></video>
 </div>
 
@@ -196,8 +196,8 @@ function startStream(){
     return false;
   }
   try{
-    video.srcObject=canvas.captureStream(5); // 你设置的 5 fps
-    // 初始化时强行静音，避免 Safari 拦截自动播放
+    // 【提速关键 1】悬浮窗推流帧率从 5帧 提升到电竞级 30帧
+    video.srcObject=canvas.captureStream(30); 
     video.muted = true;
     return true;
   }catch(e){
@@ -210,7 +210,6 @@ function stopPing(){
 }
 
 function connectMEXC(forceKill = false){
-  // 如果是强制重连，先清理掉冻结的僵尸连接
   if(ws) {
     if(!forceKill && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
     ws.close();
@@ -281,7 +280,7 @@ function connectMEXC(forceKill = false){
             }
           }
         }
-        status.textContent="🟢 实时数据更新中";
+        status.textContent="🟢 满血版 30FPS 刷新中";
       }
     }catch(e){}
   };
@@ -294,18 +293,15 @@ function connectMEXC(forceKill = false){
     stopPing();
     status.textContent="连接断开，正在极速重连…";
     clearTimeout(reconnectTimer);
-    // 【关键修复 2】缩短断线重连时间，从 3000ms 改为 500ms
     reconnectTimer=setTimeout(connectMEXC, 500);
   };
 }
 
-// 【关键修复 3】加入锁屏唤醒侦测。解锁屏幕亮起时，瞬间抢救断开的连接并恢复视频播放
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     if (video.paused) {
       video.play().catch(()=>{});
     }
-    // 如果发现 WebSocket 死了或者正在死，强制发起新连接
     if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
       status.textContent = "屏幕唤醒，极速重连中...";
       connectMEXC(true);
@@ -318,7 +314,8 @@ window.addEventListener("focus", () => {
   if (video.paused) video.play().catch(()=>{});
 });
 
-setInterval(drawCanvas, 200);
+// 【提速关键 2】画布绘制引擎限制解开，由 200毫秒缩减为 33毫秒（每秒强制重绘 30 次）
+setInterval(drawCanvas, 33);
 drawCanvas();
 
 const streamOK=startStream();
@@ -330,7 +327,6 @@ if(!streamOK){
 
 btn.addEventListener("click", () => {
   try {
-    // 【关键修复 4】静音音频注入机制。骗过系统，让悬浮窗在锁屏和后台状态下拥有媒体播放特权，防止断网
     if (!window.audioHackApplied) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
@@ -339,7 +335,7 @@ btn.addEventListener("click", () => {
       const oscillator = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
       
-      gainNode.gain.value = 0; // 绝对静音
+      gainNode.gain.value = 0; 
       
       oscillator.connect(gainNode);
       gainNode.connect(destination);
@@ -350,7 +346,7 @@ btn.addEventListener("click", () => {
         video.srcObject.addTrack(audioTrack);
       }
       
-      video.muted = false; // 解除静音限制
+      video.muted = false; 
       audioCtx.resume();
       window.audioHackApplied = true;
     }

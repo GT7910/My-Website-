@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>BTC 零延迟直推悬浮窗</title>
+<title>BTC 极速大屏悬浮窗</title>
 <style>
 html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif}
 body{text-align:center;padding:40px 16px}
@@ -36,6 +36,7 @@ const btn=document.getElementById("pipBtn");
 const status=document.getElementById("status");
 
 let btcPrice="加载中...";
+let displayPriceStr="..."; 
 let priceColor="#007aff";
 let lastPrice=0;
 let btcChangeRate="--%"; 
@@ -48,12 +49,13 @@ let ws=null;
 let pingTimer=null;
 let reconnectTimer=null;
 
-// 【提速核心 1】屏幕垂直同步渲染引擎
+// 控制无缝对齐的开关
+let hasAligned = false;
+
 let isDrawing = false;
 function scheduleDraw() {
   if (!isDrawing) {
     isDrawing = true;
-    // 抢占手机屏幕的下一次物理刷新，0延迟输出画面
     requestAnimationFrame(() => {
       drawCanvas();
       isDrawing = false;
@@ -61,10 +63,15 @@ function scheduleDraw() {
   }
 }
 
+function formatPrice(num) {
+  return parseFloat(num).toLocaleString('en-US', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+}
+
+// 借用不限制跨域的币安接口拉取历史走势形状
 async function initKlines() {
   try {
     const res = await fetch('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=60');
-    if (!res.ok) throw new Error("合约 API 响应失败");
+    if (!res.ok) throw new Error("API 响应失败");
     const data = await res.json();
     candles = data.map(k => ({
       t: Math.floor(k[0] / 60000), 
@@ -75,7 +82,7 @@ async function initKlines() {
     }));
     scheduleDraw();
   } catch (e1) {
-    window.klineError = "代理规则未覆盖 fapi 域名";
+    window.klineError = "代理未覆盖 API";
     scheduleDraw();
   }
 }
@@ -90,34 +97,29 @@ function drawCanvas(){
   ctx.strokeRect(3,3,canvas.width-6,canvas.height-6);
 
   ctx.fillStyle=priceColor;
-  ctx.font="bold 56px Arial";
+  ctx.font="bold 76px -apple-system, Arial";
   ctx.textAlign="left";
-  ctx.fillText("₮" + btcPrice, 25, 80);
+  ctx.fillText("₮" + displayPriceStr, 20, 90);
   
   ctx.fillStyle=changeColor;
-  ctx.font="bold 38px Arial";
+  ctx.font="bold 42px -apple-system, Arial";
   ctx.textAlign="right";
-  ctx.fillText(btcChangeRate, canvas.width - 25, 75);
+  ctx.fillText(btcChangeRate, canvas.width - 20, 85);
 
   const now = new Date();
   let secondsLeft = 60 - now.getSeconds();
   if (secondsLeft === 60) secondsLeft = 0;
   const cdStr = secondsLeft < 10 ? "0" + secondsLeft : secondsLeft;
-  
-  ctx.fillStyle = "#8e8e93";
-  ctx.font = "22px Arial";
-  ctx.textAlign = "center";
-  ctx.fillText("换线 00:" + cdStr, canvas.width / 2, 75);
 
   ctx.strokeStyle = "#222";
   ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.moveTo(20, 105);
-  ctx.lineTo(canvas.width - 20, 105);
+  ctx.moveTo(20, 115);
+  ctx.lineTo(canvas.width - 20, 115);
   ctx.stroke();
 
   if (candles.length > 0) {
-    const boxX = 20, boxY = 120, boxW = 600, boxH = 180;
+    const boxX = 20, boxY = 130, boxW = 600, boxH = 170;
     
     let minL = Infinity, maxH = -Infinity;
     for (let i = 0; i < candles.length; i++) {
@@ -159,12 +161,39 @@ function drawCanvas(){
       ctx.fillRect(x, bodyY, bodyW, bodyH);
     }
 
+    const lastCandle = candles[candles.length - 1];
+    const isUp = lastCandle.c >= lastCandle.o;
+    const trackColor = isUp ? "#34c759" : "#ff3b30";
+    const trackBgColor = isUp ? "rgba(52, 199, 89, 0.15)" : "rgba(255, 59, 48, 0.15)";
+    
+    const lastY = boxY + (drawMax - lastCandle.c) * scale;
+
+    ctx.setLineDash([4, 4]);
+    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = trackColor;
+    ctx.beginPath();
+    ctx.moveTo(boxX, lastY);
+    ctx.lineTo(boxX + boxW, lastY);
+    ctx.stroke();
+    ctx.setLineDash([]); 
+
+    const cdText = "00:" + cdStr;
+    ctx.font = "bold 15px -apple-system, Arial";
+    const textW = ctx.measureText(cdText).width;
+    
+    ctx.fillStyle = trackBgColor;
+    ctx.fillRect(boxX, lastY - 11, textW + 10, 22);
+    ctx.fillStyle = trackColor;
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "left";
+    ctx.fillText(cdText, boxX + 5, lastY);
+    ctx.textBaseline = "alphabetic"; 
+
     const maxY = boxY + (drawMax - maxH) * scale;
     const minY = boxY + (drawMax - minL) * scale;
 
     ctx.setLineDash([5, 5]);
     ctx.lineWidth = 1.5;
-
     ctx.strokeStyle = "#ff6666";
     ctx.beginPath();
     ctx.moveTo(boxX, maxY);
@@ -176,15 +205,12 @@ function drawCanvas(){
     ctx.moveTo(boxX, minY);
     ctx.lineTo(boxX + boxW, minY);
     ctx.stroke();
-    
     ctx.setLineDash([]); 
 
-    ctx.font = "16px Arial";
+    ctx.font = "16px -apple-system, Arial";
     ctx.textAlign = "right";
-
     ctx.fillStyle = "#ff6666";
     ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 8);
-    
     ctx.fillStyle = "#4dff4d";
     ctx.fillText("低 " + minL.toFixed(1), boxX + boxW - 5, minY + 20);
 
@@ -192,26 +218,22 @@ function drawCanvas(){
     ctx.textAlign="center";
     if (window.klineError) {
       ctx.fillStyle="#ff3b30";
-      ctx.font="22px Arial";
+      ctx.font="22px -apple-system, Arial";
       ctx.fillText("失败: " + window.klineError, canvas.width/2, 190);
       ctx.fillStyle="#8e8e93";
-      ctx.font="18px Arial";
+      ctx.font="18px -apple-system, Arial";
       ctx.fillText("等待实时推送以生成新 K 线...", canvas.width/2, 235);
     } else {
       ctx.fillStyle="#8e8e93";
-      ctx.font="22px Arial";
+      ctx.font="22px -apple-system, Arial";
       ctx.fillText("历史数据拉取中...", canvas.width/2, 210);
     }
   }
 }
 
 function startStream(){
-  if(!canvas.captureStream){
-    status.textContent="当前浏览器不支持 Canvas 视频流";
-    return false;
-  }
+  if(!canvas.captureStream) return false;
   try{
-    // 【提速核心 2】推流帧率直接拉满到苹果原生的 60 FPS
     video.srcObject=canvas.captureStream(60); 
     video.muted = true;
     return true;
@@ -224,6 +246,52 @@ function stopPing(){
   if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
 }
 
+function updateInstantPrice(p) {
+  if(!Number.isFinite(p)) return;
+
+  // 【核心黑科技：价格整体偏移缝合】
+  // 当拿到第一笔 MEXC 实时价格时，强行修正之前拉取的所有历史 K 线
+  if (!hasAligned && candles.length > 0) {
+    const lastHistoryClose = candles[candles.length - 1].c;
+    const priceOffset = p - lastHistoryClose;
+    
+    // 把前面 60 根历史 K 线整体平移，与当前 MEXC 价格完美对接
+    for(let i=0; i<candles.length; i++){
+      candles[i].o += priceOffset;
+      candles[i].h += priceOffset;
+      candles[i].l += priceOffset;
+      candles[i].c += priceOffset;
+    }
+    hasAligned = true;
+  }
+
+  if(lastPrice && p === lastPrice) return; 
+
+  if(lastPrice && p !== lastPrice){
+    priceColor = p > lastPrice ? "#34c759" : "#ff3b30";
+  }
+  btcPrice = p;
+  displayPriceStr = formatPrice(p);
+  lastPrice = p;
+  
+  const currentMinute = Math.floor(Date.now() / 60000);
+  if (candles.length > 0) {
+    let lastCandle = candles[candles.length - 1];
+    if (currentMinute === lastCandle.t) {
+      lastCandle.c = p;
+      if (p > lastCandle.h) lastCandle.h = p;
+      if (p < lastCandle.l) lastCandle.l = p;
+    } else if (currentMinute > lastCandle.t) {
+      candles.push({ t: currentMinute, o: p, h: p, l: p, c: p });
+      if (candles.length > MAX_CANDLES) candles.shift(); 
+    }
+  } else {
+    candles.push({ t: currentMinute, o: p, h: p, l: p, c: p });
+  }
+  
+  scheduleDraw();
+}
+
 function connectMEXC(forceKill = false){
   if(ws) {
     if(!forceKill && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
@@ -231,15 +299,13 @@ function connectMEXC(forceKill = false){
     ws = null;
   }
 
-  status.textContent="正在连接行情服务器…";
+  status.textContent="正在接入高速节点…";
   ws=new WebSocket("wss://contract.mexc.com/edge");
 
   ws.onopen=()=>{
-    status.textContent="已连接，等待行情推送…";
-    ws.send(JSON.stringify({
-      method:"sub.ticker",
-      param:{symbol:"BTC_USDT"}
-    }));
+    status.textContent="已连接，双轨数据窃听中…";
+    ws.send(JSON.stringify({ method:"sub.ticker", param:{symbol:"BTC_USDT"} }));
+    ws.send(JSON.stringify({ method:"sub.deal", param:{symbol:"BTC_USDT"} }));
 
     stopPing();
     pingTimer=setInterval(()=>{
@@ -252,53 +318,31 @@ function connectMEXC(forceKill = false){
   ws.onmessage=(event)=>{
     try{
       const res=JSON.parse(event.data);
+      
       if(res.channel==="push.ticker" && res.symbol==="BTC_USDT" && res.data){
-        
-        const p=parseFloat(res.data.lastPrice);
-        if(!Number.isFinite(p)) return;
-
-        if(lastPrice && p !== lastPrice){
-          if(p>lastPrice) priceColor="#34c759";
-          else if(p<lastPrice) priceColor="#ff3b30";
-        }
-        btcPrice=p.toFixed(1);
-        lastPrice=p;
-        
-        const currentMinute = Math.floor(Date.now() / 60000);
-        if (candles.length > 0) {
-          let lastCandle = candles[candles.length - 1];
-          if (currentMinute === lastCandle.t) {
-            lastCandle.c = p;
-            if (p > lastCandle.h) lastCandle.h = p;
-            if (p < lastCandle.l) lastCandle.l = p;
-          } else if (currentMinute > lastCandle.t) {
-            candles.push({ t: currentMinute, o: p, h: p, l: p, c: p });
-            if (candles.length > MAX_CANDLES) candles.shift(); 
-          }
-        } else {
-          candles.push({ t: currentMinute, o: p, h: p, l: p, c: p });
-        }
-
         if(res.data.riseFallRate !== undefined) {
           const rate = parseFloat(res.data.riseFallRate);
           if (Number.isFinite(rate)) {
             const percentStr = (rate * 100).toFixed(2) + "%";
-            if (rate > 0) {
-              btcChangeRate = "+" + percentStr;
-              changeColor = "#34c759";
-            } else if (rate < 0) {
-              btcChangeRate = percentStr;
-              changeColor = "#ff3b30";
-            } else {
-              btcChangeRate = "0.00%";
-              changeColor = "#8e8e93";
-            }
+            if (rate > 0) { btcChangeRate = "+" + percentStr; changeColor = "#34c759"; } 
+            else if (rate < 0) { btcChangeRate = percentStr; changeColor = "#ff3b30"; } 
+            else { btcChangeRate = "0.00%"; changeColor = "#8e8e93"; }
           }
         }
-        status.textContent="🟢 零延迟 60FPS 直推中";
-        
-        // 【提速核心 3】抛弃定时器，只要收到数据，立刻触发画面重绘！
-        scheduleDraw();
+        if(res.data.lastPrice) updateInstantPrice(parseFloat(res.data.lastPrice));
+      }
+
+      if(res.channel==="push.deal" && res.symbol==="BTC_USDT" && res.data){
+        let p = null;
+        if(Array.isArray(res.data) && res.data.length > 0) {
+          p = parseFloat(res.data[0].p); 
+        } else if (res.data.p) {
+          p = parseFloat(res.data.p);
+        }
+        if(p !== null) {
+          updateInstantPrice(p);
+          status.textContent="🟢 极速数据刷新中";
+        }
       }
     }catch(e){}
   };
@@ -317,9 +361,7 @@ function connectMEXC(forceKill = false){
 
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    if (video.paused) {
-      video.play().catch(()=>{});
-    }
+    if (video.paused) video.play().catch(()=>{});
     if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
       status.textContent = "屏幕唤醒，极速重连中...";
       connectMEXC(true);
@@ -332,9 +374,7 @@ window.addEventListener("focus", () => {
   if (video.paused) video.play().catch(()=>{});
 });
 
-// 定时器现在只负责更新中间的倒计时，不再干预行情渲染
 setInterval(scheduleDraw, 1000);
-scheduleDraw();
 
 const streamOK=startStream();
 if(!streamOK){

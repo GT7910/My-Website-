@@ -4,12 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>MEXC BTC 悬浮窗</title>
+<title>BTC 实时 K 线悬浮窗</title>
 <style>
 html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif}
 body{text-align:center;padding:40px 16px}
 .container{max-width:420px;margin:auto}
-button{padding:16px 24px;font-size:17px;font-weight:700;border:0;background:#007aff;color:#fff;border-radius:12px}
+h2{margin-bottom:10px;font-size:22px}
+button{padding:16px 24px;font-size:17px;font-weight:700;border:0;background:#007aff;color:#fff;border-radius:12px;margin-top:10px}
 #status{margin:18px 0 0;color:#8e8e93;font-size:13px;line-height:1.5}
 video{display:block;width:320px;height:160px;margin:25px auto 0;background:#000;border:1px solid #222;border-radius:12px}
 canvas{display:none}
@@ -17,8 +18,8 @@ canvas{display:none}
 </head>
 <body>
 <div class="container">
-<h2>MEXC BTC 永续合约</h2>
-<p id="status">正在连接 MEXC…</p>
+<h2>实时行情 & 60分钟合约视图</h2>
+<p id="status">正在建立连接…</p>
 <button id="pipBtn">⚡ 开启悬浮窗</button>
 <canvas id="canvas" width="640" height="320"></canvas>
 <video id="video" width="320" height="160" autoplay playsinline muted></video>
@@ -36,9 +37,36 @@ const status=document.getElementById("status");
 let btcPrice="加载中...";
 let priceColor="#007aff";
 let lastPrice=0;
+let btcChangeRate="--%"; 
+let changeColor="#8e8e93";
+
+let candles = [];
+const MAX_CANDLES = 60; 
+
 let ws=null;
 let pingTimer=null;
 let reconnectTimer=null;
+
+// 获取1分钟级别的 永续合约 历史K线
+async function initKlines() {
+  try {
+    // 换用 币安 U本位永续合约 公开接口 (fapi) 
+    // 合约价格全球高度同步，能完美衔接 MEXC 的实时合约数据，且无需复杂的密钥鉴权
+    const res = await fetch('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=60');
+    if (!res.ok) throw new Error("合约 API 响应失败");
+    const data = await res.json();
+    candles = data.map(k => ({
+      t: Math.floor(k[0] / 60000), 
+      o: parseFloat(k[1]),
+      h: parseFloat(k[2]),
+      l: parseFloat(k[3]),
+      c: parseFloat(k[4])
+    }));
+  } catch (e1) {
+    window.klineError = "代理规则未覆盖 fapi 域名";
+  }
+}
+initKlines();
 
 function drawCanvas(){
   ctx.fillStyle="#000";
@@ -48,26 +76,126 @@ function drawCanvas(){
   ctx.lineWidth=6;
   ctx.strokeRect(3,3,canvas.width-6,canvas.height-6);
 
-  ctx.fillStyle="#8e8e93";
-  ctx.font="bold 32px -apple-system";
-  ctx.textAlign="center";
-  ctx.fillText("MEXC  BTC永续",canvas.width/2,95);
-
   ctx.fillStyle=priceColor;
-  ctx.font="bold 76px Arial";
-  ctx.fillText("$"+btcPrice,canvas.width/2,215);
+  ctx.font="bold 56px Arial";
+  ctx.textAlign="left";
+  ctx.fillText("₮" + btcPrice, 25, 80);
+  
+  ctx.fillStyle=changeColor;
+  ctx.font="bold 38px Arial";
+  ctx.textAlign="right";
+  ctx.fillText(btcChangeRate, canvas.width - 25, 75);
+
+  const now = new Date();
+  let secondsLeft = 60 - now.getSeconds();
+  if (secondsLeft === 60) secondsLeft = 0;
+  const cdStr = secondsLeft < 10 ? "0" + secondsLeft : secondsLeft;
+  
+  ctx.fillStyle = "#8e8e93";
+  ctx.font = "22px Arial";
+  ctx.textAlign = "center";
+  ctx.fillText("换线 00:" + cdStr, canvas.width / 2, 75);
+
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(20, 105);
+  ctx.lineTo(canvas.width - 20, 105);
+  ctx.stroke();
+
+  if (candles.length > 0) {
+    const boxX = 20, boxY = 120, boxW = 600, boxH = 180;
+    
+    let minL = Infinity, maxH = -Infinity;
+    for (let i = 0; i < candles.length; i++) {
+      if (candles[i].h > maxH) maxH = candles[i].h;
+      if (candles[i].l < minL) minL = candles[i].l;
+    }
+
+    let yRange = maxH - minL;
+    if (yRange === 0) yRange = maxH * 0.001; 
+    const padding = yRange * 0.1;
+    const drawMax = maxH + padding;
+    const drawMin = minL - padding;
+    const scale = boxH / (drawMax - drawMin);
+
+    const candleSpace = boxW / MAX_CANDLES;
+    const bodyW = Math.max(candleSpace * 0.65, 2); 
+    const startIdx = MAX_CANDLES - candles.length;
+
+    for (let i = 0; i < candles.length; i++) {
+      const c = candles[i];
+      const x = boxX + (startIdx + i) * candleSpace + (candleSpace - bodyW) / 2;
+
+      const yHigh = boxY + (drawMax - c.h) * scale;
+      const yLow = boxY + (drawMax - c.l) * scale;
+      const yOpen = boxY + (drawMax - c.o) * scale;
+      const yClose = boxY + (drawMax - c.c) * scale;
+
+      ctx.fillStyle = c.c >= c.o ? "#34c759" : "#ff3b30";
+      ctx.strokeStyle = ctx.fillStyle;
+      ctx.lineWidth = 2;
+
+      ctx.beginPath();
+      ctx.moveTo(x + bodyW / 2, yHigh);
+      ctx.lineTo(x + bodyW / 2, yLow);
+      ctx.stroke();
+
+      const bodyY = Math.min(yOpen, yClose);
+      const bodyH = Math.max(Math.abs(yOpen - yClose), 2); 
+      ctx.fillRect(x, bodyY, bodyW, bodyH);
+    }
+
+    const maxY = boxY + (drawMax - maxH) * scale;
+    const minY = boxY + (drawMax - minL) * scale;
+
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.lineWidth = 1;
+
+    ctx.beginPath();
+    ctx.moveTo(boxX, maxY);
+    ctx.lineTo(boxX + boxW, maxY);
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(boxX, minY);
+    ctx.lineTo(boxX + boxW, minY);
+    ctx.stroke();
+    ctx.setLineDash([]); 
+
+    ctx.fillStyle = "#8e8e93";
+    ctx.font = "16px Arial";
+    ctx.textAlign = "right";
+    ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 6);
+    ctx.fillText("低 " + minL.toFixed(1), boxX + boxW - 5, minY + 18);
+
+  } else {
+    ctx.textAlign="center";
+    if (window.klineError) {
+      ctx.fillStyle="#ff3b30";
+      ctx.font="22px Arial";
+      ctx.fillText("历史数据获取失败: " + window.klineError, canvas.width/2, 190);
+      ctx.fillStyle="#8e8e93";
+      ctx.font="18px Arial";
+      ctx.fillText("正在等待实时价格推送，以生成新 K 线...", canvas.width/2, 235);
+    } else {
+      ctx.fillStyle="#8e8e93";
+      ctx.font="22px Arial";
+      ctx.fillText("合约历史数据拉取中...", canvas.width/2, 210);
+    }
+  }
 }
 
 function startStream(){
   if(!canvas.captureStream){
-    status.textContent="当前 iPhone 浏览器不支持 Canvas 视频流";
+    status.textContent="当前浏览器不支持 Canvas 视频流";
     return false;
   }
   try{
     video.srcObject=canvas.captureStream(5);
     return true;
   }catch(e){
-    status.textContent="无法创建视频流："+e.message;
     return false;
   }
 }
@@ -79,11 +207,11 @@ function stopPing(){
 function connectMEXC(){
   if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
 
-  status.textContent="正在连接 MEXC…";
+  status.textContent="正在连接行情服务器…";
   ws=new WebSocket("wss://contract.mexc.com/edge");
 
   ws.onopen=()=>{
-    status.textContent="已连接 MEXC，等待 BTC 价格…";
+    status.textContent="已连接，等待行情推送…";
     ws.send(JSON.stringify({
       method:"sub.ticker",
       param:{symbol:"BTC_USDT"}
@@ -101,22 +229,55 @@ function connectMEXC(){
     try{
       const res=JSON.parse(event.data);
       if(res.channel==="push.ticker" && res.symbol==="BTC_USDT" && res.data){
+        
         const p=parseFloat(res.data.lastPrice);
         if(!Number.isFinite(p)) return;
 
-        if(lastPrice){
+        if(lastPrice && p !== lastPrice){
           if(p>lastPrice) priceColor="#34c759";
           else if(p<lastPrice) priceColor="#ff3b30";
         }
         btcPrice=p.toFixed(1);
         lastPrice=p;
-        status.textContent="MEXC 实时连接正常";
+        
+        const currentMinute = Math.floor(Date.now() / 60000);
+        if (candles.length > 0) {
+          let lastCandle = candles[candles.length - 1];
+          if (currentMinute === lastCandle.t) {
+            lastCandle.c = p;
+            if (p > lastCandle.h) lastCandle.h = p;
+            if (p < lastCandle.l) lastCandle.l = p;
+          } else if (currentMinute > lastCandle.t) {
+            candles.push({ t: currentMinute, o: p, h: p, l: p, c: p });
+            if (candles.length > MAX_CANDLES) candles.shift(); 
+          }
+        } else {
+          candles.push({ t: currentMinute, o: p, h: p, l: p, c: p });
+        }
+
+        if(res.data.riseFallRate !== undefined) {
+          const rate = parseFloat(res.data.riseFallRate);
+          if (Number.isFinite(rate)) {
+            const percentStr = (rate * 100).toFixed(2) + "%";
+            if (rate > 0) {
+              btcChangeRate = "+" + percentStr;
+              changeColor = "#34c759";
+            } else if (rate < 0) {
+              btcChangeRate = percentStr;
+              changeColor = "#ff3b30";
+            } else {
+              btcChangeRate = "0.00%";
+              changeColor = "#8e8e93";
+            }
+          }
+        }
+        status.textContent="🟢 实时数据更新中";
       }
     }catch(e){}
   };
 
   ws.onerror=()=>{
-    status.textContent="MEXC 连接异常，准备重连…";
+    status.textContent="连接异常，准备重连…";
   };
 
   ws.onclose=()=>{
@@ -137,19 +298,16 @@ if(!streamOK){
   connectMEXC();
 }
 
-// 修复后的悬浮窗点击事件代码
 btn.addEventListener("click", () => {
   try {
     if (video.requestPictureInPicture) {
-      // 较新 iOS 的标准 API
       video.requestPictureInPicture().catch(error => {
          alert("开启悬浮窗失败：" + error.message + "\n\n请确保：\n1. 在 Safari 中打开\n2. 点击按钮授权");
       });
     } else if (video.webkitSetPresentationMode) {
-      // 兼容较旧版本 iOS Safari 的 API
       video.webkitSetPresentationMode("picture-in-picture");
     } else {
-      alert("当前 iOS 浏览器完全不支持视频画中画功能。");
+      alert("当前系统或浏览器完全不支持视频画中画。");
     }
   } catch (error) {
     alert("执行出错：" + error.message);

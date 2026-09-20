@@ -146,18 +146,15 @@ function drawCanvas(){
     const maxY = boxY + (drawMax - maxH) * scale;
     const minY = boxY + (drawMax - minL) * scale;
 
-    // 恢复为虚线，粗细调整为 1.5（平衡清晰度与呼吸感）
     ctx.setLineDash([5, 5]);
     ctx.lineWidth = 1.5;
 
-    // 绘制压力位 (最高点) - 明亮的荧光红
     ctx.strokeStyle = "#ff6666";
     ctx.beginPath();
     ctx.moveTo(boxX, maxY);
     ctx.lineTo(boxX + boxW, maxY);
     ctx.stroke();
 
-    // 绘制支撑位 (最低点) - 明艳的荧光绿
     ctx.strokeStyle = "#4dff4d";
     ctx.beginPath();
     ctx.moveTo(boxX, minY);
@@ -168,12 +165,8 @@ function drawCanvas(){
 
     ctx.font = "16px Arial";
     ctx.textAlign = "right";
-
-    // 写入压力位数值 - 匹配荧光红
     ctx.fillStyle = "#ff6666";
     ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 8);
-    
-    // 写入支撑位数值 - 匹配荧光绿
     ctx.fillStyle = "#4dff4d";
     ctx.fillText("低 " + minL.toFixed(1), boxX + boxW - 5, minY + 20);
 
@@ -294,6 +287,28 @@ function connectMEXC(){
     reconnectTimer=setTimeout(connectMEXC,3000);
   };
 }
+
+// 核心：锁屏唤醒机制
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    // 1. 强制恢复视频流播放
+    if (video.paused) {
+      video.play().catch(()=>{});
+    }
+    // 2. 检查网络，如果断开则立即重启连接
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      status.textContent = "唤醒中，正在重连...";
+      connectMEXC();
+    }
+    // 3. 强制重绘一次画面防卡死
+    drawCanvas();
+  }
+});
+
+// 防止在部分 iOS 版本中不触发 visibilitychange 的补充逻辑
+window.addEventListener("focus", () => {
+  if (video.paused) video.play().catch(()=>{});
+});
 
 setInterval(drawCanvas,200);
 drawCanvas();

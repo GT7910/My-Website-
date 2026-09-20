@@ -137,23 +137,22 @@ if(!streamOK){
   connectMEXC();
 }
 
-btn.addEventListener("click",async()=>{
-  try{
-    if(!document.pictureInPictureEnabled){
-      alert("此浏览器当前不支持画中画。请用 Safari 打开，并确保 iPhone 系统支持视频画中画。");
-      return;
+// 修复后的悬浮窗点击事件代码
+btn.addEventListener("click", () => {
+  try {
+    if (video.requestPictureInPicture) {
+      // 较新 iOS 的标准 API
+      video.requestPictureInPicture().catch(error => {
+         alert("开启悬浮窗失败：" + error.message + "\n\n请确保：\n1. 在 Safari 中打开\n2. 点击按钮授权");
+      });
+    } else if (video.webkitSetPresentationMode) {
+      // 兼容较旧版本 iOS Safari 的 API
+      video.webkitSetPresentationMode("picture-in-picture");
+    } else {
+      alert("当前 iOS 浏览器完全不支持视频画中画功能。");
     }
-
-    await video.play();
-
-    if(video.requestPictureInPicture){
-      await video.requestPictureInPicture();
-    }else{
-      alert("当前 iOS 浏览器没有提供 requestPictureInPicture 接口。");
-    }
-  }catch(error){
-    alert("开启悬浮窗失败：\n"+error.message+
-      "\n\n请确认：\n1. 用 Safari 打开；\n2. 不要停留在“文件”App的预览界面；\n3. 先点击一次网页里的按钮。");
+  } catch (error) {
+    alert("执行出错：" + error.message);
   }
 });
 </script>

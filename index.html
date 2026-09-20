@@ -2,22 +2,17 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
-<!-- 终极优化 1：PWA 原生化标签 -->
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="BTC 盯盘">
-<!-- 桌面图标 (提取自开源的比特币 Logo) -->
-<link rel="apple-touch-icon" href="https://upload.wikimedia.org/wikipedia/commons/thumb/4/46/Bitcoin.svg/256px-Bitcoin.svg.png">
-<title>BTC 极清 K 线悬浮窗</title>
+<title>BTC 极速 K 线悬浮窗</title>
 <style>
-html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif; overflow:hidden; /* 禁用回弹效果 */}
-body{text-align:center;padding:env(safe-area-inset-top, 40px) 16px 40px;}
+html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif}
+body{text-align:center;padding:40px 16px}
 .container{max-width:420px;margin:auto}
 h2{margin-bottom:10px;font-size:22px}
-button{padding:16px 24px;font-size:17px;font-weight:700;border:0;background:#007aff;color:#fff;border-radius:12px;margin-top:10px;cursor:pointer;}
+button{padding:16px 24px;font-size:17px;font-weight:700;border:0;background:#007aff;color:#fff;border-radius:12px;margin-top:10px}
 #status{margin:18px 0 0;color:#8e8e93;font-size:13px;line-height:1.5}
-video{display:block;width:320px;height:160px;margin:25px auto 0;background:#000;border:1px solid #222;border-radius:12px;cursor:pointer;}
+video{display:block;width:320px;height:160px;margin:25px auto 0;background:#000;border:1px solid #222;border-radius:12px}
 canvas{display:none}
 </style>
 </head>
@@ -26,8 +21,8 @@ canvas{display:none}
 <h2>实时行情 & 60分钟合约视图</h2>
 <p id="status">正在建立连接…</p>
 <button id="pipBtn">⚡ 开启悬浮窗</button>
-<canvas id="canvas"></canvas>
-<video id="video" autoplay playsinline></video>
+<canvas id="canvas" width="640" height="320"></canvas>
+<video id="video" width="320" height="160" autoplay playsinline></video>
 </div>
 
 <script>
@@ -38,13 +33,6 @@ const ctx=canvas.getContext("2d");
 const video=document.getElementById("video");
 const btn=document.getElementById("pipBtn");
 const status=document.getElementById("status");
-
-const dpr = window.devicePixelRatio || 2;
-const logicalWidth = 640;
-const logicalHeight = 320;
-canvas.width = logicalWidth * dpr;
-canvas.height = logicalHeight * dpr;
-ctx.scale(dpr, dpr);
 
 let btcPrice="加载中...";
 let priceColor="#007aff";
@@ -61,6 +49,7 @@ let reconnectTimer=null;
 let lastDrawTime=0; 
 let wakeLock=null;
 
+// 优化 1：彻底替换为 MEXC 官方历史数据接口，确保盘口绝对统一
 async function initKlines() {
   try {
     const res = await fetch('https://api.mexc.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=60');
@@ -81,6 +70,7 @@ async function initKlines() {
 }
 initKlines();
 
+// 请求屏幕常亮（防自动息屏）
 async function requestWakeLock() {
   try {
     if ('wakeLock' in navigator) {
@@ -90,6 +80,7 @@ async function requestWakeLock() {
 }
 requestWakeLock();
 
+// 优化 2：高频渲染节流器（最高 5 帧/秒），拯救手机发热与电池寿命
 function throttleDraw() {
   const now = Date.now();
   if (now - lastDrawTime > 200) { 
@@ -100,21 +91,21 @@ function throttleDraw() {
 
 function drawCanvas(){
   ctx.fillStyle="#000";
-  ctx.fillRect(0,0,logicalWidth,logicalHeight);
+  ctx.fillRect(0,0,canvas.width,canvas.height);
 
   ctx.strokeStyle="#1c1c1e";
   ctx.lineWidth=6;
-  ctx.strokeRect(3,3,logicalWidth-6,logicalHeight-6);
+  ctx.strokeRect(3,3,canvas.width-6,canvas.height-6);
 
   ctx.fillStyle=priceColor;
-  ctx.font="bold 56px -apple-system, Arial";
+  ctx.font="bold 56px Arial";
   ctx.textAlign="left";
   ctx.fillText("₮" + btcPrice, 25, 80);
   
   ctx.fillStyle=changeColor;
-  ctx.font="bold 38px -apple-system, Arial";
+  ctx.font="bold 38px Arial";
   ctx.textAlign="right";
-  ctx.fillText(btcChangeRate, logicalWidth - 25, 75);
+  ctx.fillText(btcChangeRate, canvas.width - 25, 75);
 
   const now = new Date();
   let secondsLeft = 60 - now.getSeconds();
@@ -122,15 +113,15 @@ function drawCanvas(){
   const cdStr = secondsLeft < 10 ? "0" + secondsLeft : secondsLeft;
   
   ctx.fillStyle = "#8e8e93";
-  ctx.font = "22px -apple-system, Arial";
+  ctx.font = "22px Arial";
   ctx.textAlign = "center";
-  ctx.fillText("换线 00:" + cdStr, logicalWidth / 2, 75);
+  ctx.fillText("换线 00:" + cdStr, canvas.width / 2, 75);
 
   ctx.strokeStyle = "#222";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(20, 105);
-  ctx.lineTo(logicalWidth - 20, 105);
+  ctx.lineTo(canvas.width - 20, 105);
   ctx.stroke();
 
   if (candles.length > 0) {
@@ -196,7 +187,7 @@ function drawCanvas(){
     
     ctx.setLineDash([]); 
 
-    ctx.font = "16px -apple-system, Arial";
+    ctx.font = "16px Arial";
     ctx.textAlign = "right";
     ctx.fillStyle = "#ff6666";
     ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 8);
@@ -207,15 +198,15 @@ function drawCanvas(){
     ctx.textAlign="center";
     if (window.klineError) {
       ctx.fillStyle="#ff3b30";
-      ctx.font="22px -apple-system, Arial";
-      ctx.fillText("失败: " + window.klineError, logicalWidth/2, 190);
+      ctx.font="22px Arial";
+      ctx.fillText("失败: " + window.klineError, canvas.width/2, 190);
       ctx.fillStyle="#8e8e93";
-      ctx.font="18px -apple-system, Arial";
-      ctx.fillText("等待 MEXC 实时推送以生成 K 线...", logicalWidth/2, 235);
+      ctx.font="18px Arial";
+      ctx.fillText("等待 MEXC 实时推送以生成 K 线...", canvas.width/2, 235);
     } else {
       ctx.fillStyle="#8e8e93";
-      ctx.font="22px -apple-system, Arial";
-      ctx.fillText("正在拉取 MEXC 历史数据...", logicalWidth/2, 210);
+      ctx.font="22px Arial";
+      ctx.fillText("正在拉取 MEXC 历史数据...", canvas.width/2, 210);
     }
   }
 }
@@ -238,15 +229,10 @@ function stopPing(){
   if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
 }
 
-// 增加 forceKill 参数，用于在网络切换时强杀僵尸连接
-function connectMEXC(forceKill = false){
-  if(ws) {
-    if(!forceKill && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
-    ws.close();
-    ws = null;
-  }
+function connectMEXC(){
+  if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
 
-  status.textContent="正在连接抹茶 (MEXC) 高速节点…";
+  status.textContent="正在连接抹茶 (MEXC) 行情服务器…";
   ws=new WebSocket("wss://contract.mexc.com/edge");
 
   ws.onopen=()=>{
@@ -310,37 +296,32 @@ function connectMEXC(forceKill = false){
             }
           }
         }
-        status.textContent="🟢 抹茶 (MEXC) 极速模式已开启";
+        status.textContent="🟢 抹茶 (MEXC) 实时更新中";
+        
+        // 使用节流器替代直接重绘，大幅省电
         throttleDraw(); 
       }
     }catch(e){}
   };
 
   ws.onerror=()=>{
-    status.textContent="网络波动，极速重连中…";
+    status.textContent="连接异常，准备极速重连…";
   };
 
   ws.onclose=()=>{
     stopPing();
-    status.textContent="连接断开，极速重连中…";
+    status.textContent="断开连接，正在极速重连…";
     clearTimeout(reconnectTimer);
     reconnectTimer=setTimeout(connectMEXC, 500);
   };
 }
 
-// 终极优化 2：监听底层基站/Wi-Fi网络切换，强杀僵尸连接
-window.addEventListener('online', () => {
-  status.textContent = "网络已恢复，正在强行重连...";
-  connectMEXC(true); 
-});
-window.addEventListener('offline', () => {
-  status.textContent = "网络已断开，请检查代理或 Wi-Fi...";
-});
-
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     requestWakeLock();
-    if (video.paused) video.play().catch(()=>{});
+    if (video.paused) {
+      video.play().catch(()=>{});
+    }
     if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
       status.textContent = "唤醒中，正在极速重连...";
       connectMEXC();
@@ -353,6 +334,7 @@ window.addEventListener("focus", () => {
   if (video.paused) video.play().catch(()=>{});
 });
 
+// 仅用于更新时间倒计时
 setInterval(drawCanvas, 1000);
 drawCanvas();
 
@@ -363,12 +345,13 @@ if(!streamOK){
   connectMEXC();
 }
 
-function triggerPiP() {
+btn.addEventListener("click", () => {
   try {
     requestWakeLock();
     if (!window.audioHackApplied) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
+      
       const destination = audioCtx.createMediaStreamDestination();
       const oscillator = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
@@ -390,16 +373,16 @@ function triggerPiP() {
     }
 
     if (video.requestPictureInPicture) {
-      video.requestPictureInPicture().catch(e => {});
+      video.requestPictureInPicture().catch(error => {
+         alert("开启悬浮窗失败：" + error.message + "\n\n请确保在 Safari 中打开！");
+      });
     } else if (video.webkitSetPresentationMode) {
       video.webkitSetPresentationMode("picture-in-picture");
     }
-  } catch (error) {}
-}
-
-btn.addEventListener("click", triggerPiP);
-video.addEventListener("click", triggerPiP);
-
+  } catch (error) {
+    alert("执行出错：" + error.message);
+  }
+});
 </script>
 </body>
 </html>

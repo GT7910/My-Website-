@@ -22,7 +22,6 @@ canvas{display:none}
 <p id="status">正在建立连接…</p>
 <button id="pipBtn">⚡ 开启悬浮窗</button>
 <canvas id="canvas" width="640" height="320"></canvas>
-<!-- 移除了原有的 muted 属性，允许程序在点击时注入音频 -->
 <video id="video" width="320" height="160" autoplay playsinline></video>
 </div>
 
@@ -48,25 +47,22 @@ let ws=null;
 let pingTimer=null;
 let reconnectTimer=null;
 
-// OKX AWS 直连节点
+// 为了快速初始化画面，历史数据依然借用 fapi 接口，随后由 MEXC 实时接管
 async function initKlines() {
   try {
-    const res = await fetch('https://aws.okx.com/api/v5/market/candles?instId=BTC-USDT-SWAP&bar=1m&limit=60');
-    const json = await res.json();
-    if (json.code === "0") {
-      candles = json.data.reverse().map(k => ({
-        t: Math.floor(parseInt(k[0]) / 60000), 
-        o: parseFloat(k[1]),
-        h: parseFloat(k[2]),
-        l: parseFloat(k[3]),
-        c: parseFloat(k[4])
-      }));
-      drawCanvas();
-    } else {
-      throw new Error("OKX 数据异常");
-    }
+    const res = await fetch('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=60');
+    if (!res.ok) throw new Error("API 响应失败");
+    const data = await res.json();
+    candles = data.map(k => ({
+      t: Math.floor(k[0] / 60000), 
+      o: parseFloat(k[1]),
+      h: parseFloat(k[2]),
+      l: parseFloat(k[3]),
+      c: parseFloat(k[4])
+    }));
+    drawCanvas();
   } catch (e) {
-    window.klineError = "免翻接口被当地运营商阻断";
+    window.klineError = "代理规则未覆盖历史数据域名";
     drawCanvas();
   }
 }
@@ -182,14 +178,14 @@ function drawCanvas(){
     if (window.klineError) {
       ctx.fillStyle="#ff3b30";
       ctx.font="22px Arial";
-      ctx.fillText("失败: " + window.klineError, canvas.width/2, 190);
+      ctx.fillText("历史数据获取失败: " + window.klineError, canvas.width/2, 190);
       ctx.fillStyle="#8e8e93";
       ctx.font="18px Arial";
-      ctx.fillText("正在等待实时价格推送，以生成新 K 线...", canvas.width/2, 235);
+      ctx.fillText("正在等待 MEXC 实时推送，以生成新 K 线...", canvas.width/2, 235);
     } else {
       ctx.fillStyle="#8e8e93";
       ctx.font="22px Arial";
-      ctx.fillText("OKX 合约历史数据拉取中...", canvas.width/2, 210);
+      ctx.fillText("合约历史数据拉取中...", canvas.width/2, 210);
     }
   }
 }
@@ -201,7 +197,7 @@ function startStream(){
   }
   try{
     video.srcObject=canvas.captureStream(30);
-    // 初始化时先强行静音，避免网页加载时自动播放被系统拦截
+    // 初始化强制静音
     video.muted = true;
     return true;
   }catch(e){
@@ -213,35 +209,34 @@ function stopPing(){
   if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
 }
 
-function connectOKX(){
+function connectMEXC(){
   if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
 
-  status.textContent="正在连接 OKX 行情服务器…";
-  ws=new WebSocket("wss://wsaws.okx.com:8443/ws/v5/public");
+  status.textContent="正在连接抹茶 (MEXC) 行情服务器…";
+  // 接入 MEXC 永续合约 WebSocket 接口
+  ws=new WebSocket("wss://contract.mexc.com/edge");
 
   ws.onopen=()=>{
-    status.textContent="已连接，等待 OKX 推送…";
+    status.textContent="已连接，等待 MEXC 推送…";
     ws.send(JSON.stringify({
-      op: "subscribe",
-      args: [{ channel: "tickers", instId: "BTC-USDT-SWAP" }]
+      method:"sub.ticker",
+      param:{symbol:"BTC_USDT"}
     }));
 
     stopPing();
     pingTimer=setInterval(()=>{
       if(ws && ws.readyState===WebSocket.OPEN){
-        ws.send("ping");
+        ws.send(JSON.stringify({method:"ping"}));
       }
-    }, 20000);
+    },15000);
   };
 
   ws.onmessage=(event)=>{
-    if (event.data === "pong") return; 
     try{
       const res=JSON.parse(event.data);
-      if(res.arg && res.arg.channel==="tickers" && res.data && res.data.length > 0){
+      if(res.channel==="push.ticker" && res.symbol==="BTC_USDT" && res.data){
         
-        const tick = res.data[0];
-        const p=parseFloat(tick.last);
+        const p=parseFloat(res.data.lastPrice);
         if(!Number.isFinite(p)) return;
 
         if(lastPrice && p !== lastPrice){
@@ -250,22 +245,6 @@ function connectOKX(){
         }
         btcPrice=p.toFixed(1);
         lastPrice=p;
-
-        const open = parseFloat(tick.sodUtc8);
-        if (open > 0) {
-          const rate = (p - open) / open;
-          const percentStr = (rate * 100).toFixed(2) + "%";
-          if (rate > 0) {
-            btcChangeRate = "+" + percentStr;
-            changeColor = "#34c759";
-          } else if (rate < 0) {
-            btcChangeRate = percentStr;
-            changeColor = "#ff3b30";
-          } else {
-            btcChangeRate = "0.00%";
-            changeColor = "#8e8e93";
-          }
-        }
         
         const currentMinute = Math.floor(Date.now() / 60000);
         if (candles.length > 0) {
@@ -282,7 +261,24 @@ function connectOKX(){
           candles.push({ t: currentMinute, o: p, h: p, l: p, c: p });
         }
 
-        status.textContent="🟢 OKX 永续合约实时更新中";
+        if(res.data.riseFallRate !== undefined) {
+          const rate = parseFloat(res.data.riseFallRate);
+          if (Number.isFinite(rate)) {
+            const percentStr = (rate * 100).toFixed(2) + "%";
+            if (rate > 0) {
+              btcChangeRate = "+" + percentStr;
+              changeColor = "#34c759";
+            } else if (rate < 0) {
+              btcChangeRate = percentStr;
+              changeColor = "#ff3b30";
+            } else {
+              btcChangeRate = "0.00%";
+              changeColor = "#8e8e93";
+            }
+          }
+        }
+        status.textContent="🟢 抹茶 (MEXC) 实时更新中";
+        
         drawCanvas(); 
       }
     }catch(e){}
@@ -296,7 +292,7 @@ function connectOKX(){
     stopPing();
     status.textContent="连接断开，3 秒后重连…";
     clearTimeout(reconnectTimer);
-    reconnectTimer=setTimeout(connectOKX,3000);
+    reconnectTimer=setTimeout(connectMEXC,3000);
   };
 }
 
@@ -307,7 +303,7 @@ document.addEventListener("visibilitychange", () => {
     }
     if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
       status.textContent = "唤醒中，正在重连...";
-      connectOKX();
+      connectMEXC();
     }
     drawCanvas();
   }
@@ -324,41 +320,33 @@ const streamOK=startStream();
 if(!streamOK){
   btn.disabled=true;
 }else{
-  connectOKX();
+  connectMEXC();
 }
 
-// 点击按钮时触发保活黑科技
+// 悬浮窗保活黑科技
 btn.addEventListener("click", () => {
   try {
-    // 【核心破解：静音音频保活注入】
     if (!window.audioHackApplied) {
       const AudioContext = window.AudioContext || window.webkitAudioContext;
       const audioCtx = new AudioContext();
       
-      // 生成一个音频目的地节点
       const destination = audioCtx.createMediaStreamDestination();
-      
-      // 创建一个发声器
       const oscillator = audioCtx.createOscillator();
       const gainNode = audioCtx.createGain();
       
-      // 【关键】将音量设置为绝对 0（完全无声）
       gainNode.gain.value = 0; 
       
       oscillator.connect(gainNode);
       gainNode.connect(destination);
       oscillator.start();
 
-      // 把这个绝对静音的音频轨道，提取并塞进我们的视频流里
       const audioTrack = destination.stream.getAudioTracks()[0];
       if (audioTrack && video.srcObject) {
         video.srcObject.addTrack(audioTrack);
       }
       
-      // 解除 video 的静音限制（因为有了用户点击授权，且声音是 0），骗过系统
       video.muted = false;
       audioCtx.resume();
-      
       window.audioHackApplied = true;
     }
 

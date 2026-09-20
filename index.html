@@ -47,11 +47,8 @@ let ws=null;
 let pingTimer=null;
 let reconnectTimer=null;
 
-// 获取1分钟级别的 永续合约 历史K线
 async function initKlines() {
   try {
-    // 换用 币安 U本位永续合约 公开接口 (fapi) 
-    // 合约价格全球高度同步，能完美衔接 MEXC 的实时合约数据，且无需复杂的密钥鉴权
     const res = await fetch('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=60');
     if (!res.ok) throw new Error("合约 API 响应失败");
     const data = await res.json();
@@ -150,24 +147,33 @@ function drawCanvas(){
     const minY = boxY + (drawMax - minL) * scale;
 
     ctx.setLineDash([4, 4]);
-    ctx.strokeStyle = "rgba(255,255,255,0.15)";
     ctx.lineWidth = 1;
 
+    // 绘制压力位 (最高点) - 半透明红色
+    ctx.strokeStyle = "rgba(255, 59, 48, 0.4)";
     ctx.beginPath();
     ctx.moveTo(boxX, maxY);
     ctx.lineTo(boxX + boxW, maxY);
     ctx.stroke();
 
+    // 绘制支撑位 (最低点) - 半透明绿色
+    ctx.strokeStyle = "rgba(52, 199, 89, 0.4)";
     ctx.beginPath();
     ctx.moveTo(boxX, minY);
     ctx.lineTo(boxX + boxW, minY);
     ctx.stroke();
+    
     ctx.setLineDash([]); 
 
-    ctx.fillStyle = "#8e8e93";
     ctx.font = "16px Arial";
     ctx.textAlign = "right";
+
+    // 写入压力位数值 - 红色
+    ctx.fillStyle = "#ff3b30";
     ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 6);
+    
+    // 写入支撑位数值 - 绿色
+    ctx.fillStyle = "#34c759";
     ctx.fillText("低 " + minL.toFixed(1), boxX + boxW - 5, minY + 18);
 
   } else {

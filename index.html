@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>BTC 实时 K 线悬浮窗</title>
+<title>BTC 零延迟直推悬浮窗</title>
 <style>
 html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif}
 body{text-align:center;padding:40px 16px}
@@ -48,6 +48,19 @@ let ws=null;
 let pingTimer=null;
 let reconnectTimer=null;
 
+// 【提速核心 1】屏幕垂直同步渲染引擎
+let isDrawing = false;
+function scheduleDraw() {
+  if (!isDrawing) {
+    isDrawing = true;
+    // 抢占手机屏幕的下一次物理刷新，0延迟输出画面
+    requestAnimationFrame(() => {
+      drawCanvas();
+      isDrawing = false;
+    });
+  }
+}
+
 async function initKlines() {
   try {
     const res = await fetch('https://fapi.binance.com/fapi/v1/klines?symbol=BTCUSDT&interval=1m&limit=60');
@@ -60,8 +73,10 @@ async function initKlines() {
       l: parseFloat(k[3]),
       c: parseFloat(k[4])
     }));
+    scheduleDraw();
   } catch (e1) {
     window.klineError = "代理规则未覆盖 fapi 域名";
+    scheduleDraw();
   }
 }
 initKlines();
@@ -178,14 +193,14 @@ function drawCanvas(){
     if (window.klineError) {
       ctx.fillStyle="#ff3b30";
       ctx.font="22px Arial";
-      ctx.fillText("历史数据获取失败: " + window.klineError, canvas.width/2, 190);
+      ctx.fillText("失败: " + window.klineError, canvas.width/2, 190);
       ctx.fillStyle="#8e8e93";
       ctx.font="18px Arial";
-      ctx.fillText("正在等待实时价格推送，以生成新 K 线...", canvas.width/2, 235);
+      ctx.fillText("等待实时推送以生成新 K 线...", canvas.width/2, 235);
     } else {
       ctx.fillStyle="#8e8e93";
       ctx.font="22px Arial";
-      ctx.fillText("合约历史数据拉取中...", canvas.width/2, 210);
+      ctx.fillText("历史数据拉取中...", canvas.width/2, 210);
     }
   }
 }
@@ -196,8 +211,8 @@ function startStream(){
     return false;
   }
   try{
-    // 【提速关键 1】悬浮窗推流帧率从 5帧 提升到电竞级 30帧
-    video.srcObject=canvas.captureStream(30); 
+    // 【提速核心 2】推流帧率直接拉满到苹果原生的 60 FPS
+    video.srcObject=canvas.captureStream(60); 
     video.muted = true;
     return true;
   }catch(e){
@@ -280,7 +295,10 @@ function connectMEXC(forceKill = false){
             }
           }
         }
-        status.textContent="🟢 满血版 30FPS 刷新中";
+        status.textContent="🟢 零延迟 60FPS 直推中";
+        
+        // 【提速核心 3】抛弃定时器，只要收到数据，立刻触发画面重绘！
+        scheduleDraw();
       }
     }catch(e){}
   };
@@ -306,7 +324,7 @@ document.addEventListener("visibilitychange", () => {
       status.textContent = "屏幕唤醒，极速重连中...";
       connectMEXC(true);
     }
-    drawCanvas();
+    scheduleDraw();
   }
 });
 
@@ -314,9 +332,9 @@ window.addEventListener("focus", () => {
   if (video.paused) video.play().catch(()=>{});
 });
 
-// 【提速关键 2】画布绘制引擎限制解开，由 200毫秒缩减为 33毫秒（每秒强制重绘 30 次）
-setInterval(drawCanvas, 33);
-drawCanvas();
+// 定时器现在只负责更新中间的倒计时，不再干预行情渲染
+setInterval(scheduleDraw, 1000);
+scheduleDraw();
 
 const streamOK=startStream();
 if(!streamOK){
@@ -353,12 +371,10 @@ btn.addEventListener("click", () => {
 
     if (video.requestPictureInPicture) {
       video.requestPictureInPicture().catch(error => {
-         alert("开启悬浮窗失败：" + error.message + "\n\n请确保：\n1. 在 Safari 中打开\n2. 点击按钮授权");
+         alert("开启悬浮窗失败：" + error.message);
       });
     } else if (video.webkitSetPresentationMode) {
       video.webkitSetPresentationMode("picture-in-picture");
-    } else {
-      alert("当前系统或浏览器完全不支持视频画中画。");
     }
   } catch (error) {
     alert("执行出错：" + error.message);

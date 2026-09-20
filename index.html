@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>BTC 实时 K 线悬浮窗</title>
+<title>BTC 极速 K 线悬浮窗</title>
 <style>
 html,body{margin:0;background:#000;color:#fff;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display",sans-serif}
 body{text-align:center;padding:40px 16px}
@@ -59,8 +59,10 @@ async function initKlines() {
       l: parseFloat(k[3]),
       c: parseFloat(k[4])
     }));
+    drawCanvas(); // 历史数据拉取完毕后立刻画一次
   } catch (e1) {
     window.klineError = "代理规则未覆盖 fapi 域名";
+    drawCanvas();
   }
 }
 initKlines();
@@ -193,7 +195,8 @@ function startStream(){
     return false;
   }
   try{
-    video.srcObject=canvas.captureStream(5);
+    // 将抓取帧率从 5 大幅提升至 30，消除播放器底层缓冲造成的视觉延迟
+    video.srcObject=canvas.captureStream(30);
     return true;
   }catch(e){
     return false;
@@ -272,6 +275,9 @@ function connectMEXC(){
           }
         }
         status.textContent="🟢 实时数据更新中";
+        
+        // 关键优化：接收到数据的 0 毫秒瞬间直接强制重绘画布，拒绝定时器空等！
+        drawCanvas(); 
       }
     }catch(e){}
   };
@@ -288,29 +294,25 @@ function connectMEXC(){
   };
 }
 
-// 核心：锁屏唤醒机制
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    // 1. 强制恢复视频流播放
     if (video.paused) {
       video.play().catch(()=>{});
     }
-    // 2. 检查网络，如果断开则立即重启连接
     if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
       status.textContent = "唤醒中，正在重连...";
       connectMEXC();
     }
-    // 3. 强制重绘一次画面防卡死
     drawCanvas();
   }
 });
 
-// 防止在部分 iOS 版本中不触发 visibilitychange 的补充逻辑
 window.addEventListener("focus", () => {
   if (video.paused) video.play().catch(()=>{});
 });
 
-setInterval(drawCanvas,200);
+// 仅保留一个 1 秒触发一次的保底定时器，专门用于更新“倒计时读秒”
+setInterval(drawCanvas, 1000);
 drawCanvas();
 
 const streamOK=startStream();

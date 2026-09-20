@@ -22,7 +22,8 @@ canvas{display:none}
 <p id="status">正在建立连接…</p>
 <button id="pipBtn">⚡ 开启悬浮窗</button>
 <canvas id="canvas" width="640" height="320"></canvas>
-<video id="video" width="320" height="160" autoplay playsinline muted></video>
+<!-- 【关键修复 1】移除了 muted 属性，允许后续注入空白音频以保活后台 -->
+<video id="video" width="320" height="160" autoplay playsinline></video>
 </div>
 
 <script>
@@ -146,19 +147,16 @@ function drawCanvas(){
     const maxY = boxY + (drawMax - maxH) * scale;
     const minY = boxY + (drawMax - minL) * scale;
 
-    // 加长虚线段，同时将线条加粗到 2px
-    ctx.setLineDash([6, 5]);
-    ctx.lineWidth = 2;
+    ctx.setLineDash([5, 5]);
+    ctx.lineWidth = 1.5;
 
-    // 绘制压力位 (最高点) - 纯正醒目红色
-    ctx.strokeStyle = "#ff3b30";
+    ctx.strokeStyle = "#ff6666";
     ctx.beginPath();
     ctx.moveTo(boxX, maxY);
     ctx.lineTo(boxX + boxW, maxY);
     ctx.stroke();
 
-    // 绘制支撑位 (最低点) - 纯正醒目绿色
-    ctx.strokeStyle = "#34c759";
+    ctx.strokeStyle = "#4dff4d";
     ctx.beginPath();
     ctx.moveTo(boxX, minY);
     ctx.lineTo(boxX + boxW, minY);
@@ -169,12 +167,10 @@ function drawCanvas(){
     ctx.font = "16px Arial";
     ctx.textAlign = "right";
 
-    // 写入压力位数值 - 红色
-    ctx.fillStyle = "#ff3b30";
+    ctx.fillStyle = "#ff6666";
     ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 8);
     
-    // 写入支撑位数值 - 绿色
-    ctx.fillStyle = "#34c759";
+    ctx.fillStyle = "#4dff4d";
     ctx.fillText("低 " + minL.toFixed(1), boxX + boxW - 5, minY + 20);
 
   } else {
@@ -200,7 +196,9 @@ function startStream(){
     return false;
   }
   try{
-    video.srcObject=canvas.captureStream(5);
+    video.srcObject=canvas.captureStream(5); // 你设置的 5 fps
+    // 初始化时强行静音，避免 Safari 拦截自动播放
+    video.muted = true;
     return true;
   }catch(e){
     return false;
@@ -211,8 +209,13 @@ function stopPing(){
   if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
 }
 
-function connectMEXC(){
-  if(ws && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
+function connectMEXC(forceKill = false){
+  // 如果是强制重连，先清理掉冻结的僵尸连接
+  if(ws) {
+    if(!forceKill && (ws.readyState===WebSocket.OPEN || ws.readyState===WebSocket.CONNECTING)) return;
+    ws.close();
+    ws = null;
+  }
 
   status.textContent="正在连接行情服务器…";
   ws=new WebSocket("wss://contract.mexc.com/edge");
@@ -284,18 +287,38 @@ function connectMEXC(){
   };
 
   ws.onerror=()=>{
-    status.textContent="连接异常，准备重连…";
+    status.textContent="连接异常，准备极速重连…";
   };
 
   ws.onclose=()=>{
     stopPing();
-    status.textContent="连接断开，3 秒后重连…";
+    status.textContent="连接断开，正在极速重连…";
     clearTimeout(reconnectTimer);
-    reconnectTimer=setTimeout(connectMEXC,3000);
+    // 【关键修复 2】缩短断线重连时间，从 3000ms 改为 500ms
+    reconnectTimer=setTimeout(connectMEXC, 500);
   };
 }
 
-setInterval(drawCanvas,200);
+// 【关键修复 3】加入锁屏唤醒侦测。解锁屏幕亮起时，瞬间抢救断开的连接并恢复视频播放
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    if (video.paused) {
+      video.play().catch(()=>{});
+    }
+    // 如果发现 WebSocket 死了或者正在死，强制发起新连接
+    if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+      status.textContent = "屏幕唤醒，极速重连中...";
+      connectMEXC(true);
+    }
+    drawCanvas();
+  }
+});
+
+window.addEventListener("focus", () => {
+  if (video.paused) video.play().catch(()=>{});
+});
+
+setInterval(drawCanvas, 200);
 drawCanvas();
 
 const streamOK=startStream();
@@ -307,6 +330,31 @@ if(!streamOK){
 
 btn.addEventListener("click", () => {
   try {
+    // 【关键修复 4】静音音频注入机制。骗过系统，让悬浮窗在锁屏和后台状态下拥有媒体播放特权，防止断网
+    if (!window.audioHackApplied) {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      const audioCtx = new AudioContext();
+      
+      const destination = audioCtx.createMediaStreamDestination();
+      const oscillator = audioCtx.createOscillator();
+      const gainNode = audioCtx.createGain();
+      
+      gainNode.gain.value = 0; // 绝对静音
+      
+      oscillator.connect(gainNode);
+      gainNode.connect(destination);
+      oscillator.start();
+
+      const audioTrack = destination.stream.getAudioTracks()[0];
+      if (audioTrack && video.srcObject) {
+        video.srcObject.addTrack(audioTrack);
+      }
+      
+      video.muted = false; // 解除静音限制
+      audioCtx.resume();
+      window.audioHackApplied = true;
+    }
+
     if (video.requestPictureInPicture) {
       video.requestPictureInPicture().catch(error => {
          alert("开启悬浮窗失败：" + error.message + "\n\n请确保：\n1. 在 Safari 中打开\n2. 点击按钮授权");

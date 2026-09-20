@@ -146,18 +146,19 @@ function drawCanvas(){
     const maxY = boxY + (drawMax - maxH) * scale;
     const minY = boxY + (drawMax - minL) * scale;
 
-    ctx.setLineDash([4, 4]);
-    ctx.lineWidth = 1;
+    // 加长虚线段，同时将线条加粗到 2px
+    ctx.setLineDash([6, 5]);
+    ctx.lineWidth = 2;
 
-    // 绘制压力位 (最高点) - 半透明红色
-    ctx.strokeStyle = "rgba(255, 59, 48, 0.4)";
+    // 绘制压力位 (最高点) - 纯正醒目红色
+    ctx.strokeStyle = "#ff3b30";
     ctx.beginPath();
     ctx.moveTo(boxX, maxY);
     ctx.lineTo(boxX + boxW, maxY);
     ctx.stroke();
 
-    // 绘制支撑位 (最低点) - 半透明绿色
-    ctx.strokeStyle = "rgba(52, 199, 89, 0.4)";
+    // 绘制支撑位 (最低点) - 纯正醒目绿色
+    ctx.strokeStyle = "#34c759";
     ctx.beginPath();
     ctx.moveTo(boxX, minY);
     ctx.lineTo(boxX + boxW, minY);
@@ -170,11 +171,11 @@ function drawCanvas(){
 
     // 写入压力位数值 - 红色
     ctx.fillStyle = "#ff3b30";
-    ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 6);
+    ctx.fillText("高 " + maxH.toFixed(1), boxX + boxW - 5, maxY - 8);
     
     // 写入支撑位数值 - 绿色
     ctx.fillStyle = "#34c759";
-    ctx.fillText("低 " + minL.toFixed(1), boxX + boxW - 5, minY + 18);
+    ctx.fillText("低 " + minL.toFixed(1), boxX + boxW - 5, minY + 20);
 
   } else {
     ctx.textAlign="center";
